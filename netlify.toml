@@ -1,0 +1,11 @@
+# Netlify legge da qui il comando di build e la cartella da pubblicare:
+# non serve configurare nulla a mano nell'interfaccia.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
