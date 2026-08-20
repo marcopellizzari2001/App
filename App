@@ -1,0 +1,12 @@
+index.html
+package.json
+vite.config.js
+netlify.toml
+.gitignore
+src/main.jsx
+src/App.jsx
+public/manifest.webmanifest
+public/sw.js
+public/icon-180.png
+public/icon-192.png
+public/icon-512.png
