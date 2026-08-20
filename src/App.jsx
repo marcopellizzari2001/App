@@ -262,6 +262,8 @@ const CSS = `
   animation:up .42s cubic-bezier(.2,1.02,.34,1) both; }
 @keyframes up { from{transform:translateY(102%)} to{transform:none} }
 .grip { width:38px; height:5px; border-radius:3px; background:rgba(24,22,44,.18); margin:0 auto 14px; }
+.sheet-handle { touch-action:none; cursor:grab; }
+.sheet-handle:active { cursor:grabbing; }
 
 .display { text-align:center; padding:6px 0 16px; }
 .display-amt { font-size:52px; font-weight:700; letter-spacing:-.045em; line-height:1; }
@@ -1056,9 +1058,86 @@ function EntrySheet({ tx, onSave, onDelete, onClose }) {
   const [note, setNote] = useState(editing ? (tx.rec ? "" : tx.note || "") : "");
   const [confirmDel, setConfirmDel] = useState(false);
   const stripRef = useRef(null);
+  const sheetRef = useRef(null);
+  // active: pointer is down somewhere in the sheet, not yet decided what the gesture is.
+  // moving: confirmed as a sheet-drag (as opposed to a tap, or a scroll/swipe the sheet itself should ignore).
+  const drag = useRef({ active: false, moving: false, pointerId: null, startX: 0, startY: 0, startT: 0, lastY: 0 });
 
   const amount = parseAmount(raw);
   const valid = amount > 0 && category;
+
+  const DISMISS_DISTANCE = 110;
+  const DISMISS_VELOCITY = 0.6; // px/ms
+  const DRAG_SLOP = 6; // px of wiggle room before a touch counts as an intentional drag, not a tap
+
+  const closeWithSlide = () => {
+    const el = sheetRef.current;
+    if (el) {
+      el.style.transition = "transform .22s cubic-bezier(.22,1,.36,1)";
+      el.style.transform = "translateY(100%)";
+    }
+    setTimeout(onClose, 200);
+  };
+
+  const snapBack = () => {
+    const el = sheetRef.current;
+    if (el) {
+      el.style.transition = "transform .3s cubic-bezier(.22,1,.36,1)";
+      el.style.transform = "";
+    }
+  };
+
+  const onSheetPointerDown = (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    drag.current = {
+      active: true, moving: false, pointerId: e.pointerId,
+      startX: e.clientX, startY: e.clientY, startT: Date.now(), lastY: e.clientY,
+    };
+  };
+
+  const onSheetPointerMove = (e) => {
+    const d = drag.current;
+    if (!d.active || e.pointerId !== d.pointerId) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+    d.lastY = e.clientY;
+
+    if (!d.moving) {
+      if (Math.abs(dx) < DRAG_SLOP && Math.abs(dy) < DRAG_SLOP) return;
+      // Only claim the gesture when it's clearly a downward drag (not a horizontal
+      // swipe on the category strip, and not an upward scroll of the sheet's own
+      // content) and the sheet content is scrolled all the way to the top — mirrors
+      // how Apple's sheets defer to inner scrolling first, then drag once at the top.
+      const goingDown = dy > 0 && dy > Math.abs(dx) * 1.2;
+      const atTop = (sheetRef.current?.scrollTop ?? 0) <= 0;
+      if (!goingDown || !atTop) { d.active = false; return; }
+      d.moving = true;
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    }
+
+    e.preventDefault();
+    const offset = Math.max(0, dy);
+    const el = sheetRef.current;
+    if (el) {
+      el.style.transition = "none";
+      el.style.transform = `translateY(${offset}px)`;
+    }
+  };
+
+  const onSheetPointerUp = (e) => {
+    const d = drag.current;
+    if (!d.active || e.pointerId !== d.pointerId) return;
+    d.active = false;
+    if (!d.moving) return;
+    d.moving = false;
+    const offset = Math.max(0, d.lastY - d.startY);
+    const velocity = offset / Math.max(1, Date.now() - d.startT);
+    if (offset > DISMISS_DISTANCE || (offset > 24 && velocity > DISMISS_VELOCITY)) {
+      closeWithSlide();
+    } else {
+      snapBack();
+    }
+  };
 
   const press = (k) => {
     setRaw((r) => {
@@ -1074,13 +1153,22 @@ function EntrySheet({ tx, onSave, onDelete, onClose }) {
   const display = raw === "" ? "0" : raw;
 
   return (
-    <div className="sheet" role="dialog" aria-label={editing ? "Modifica spesa" : "Nuova spesa"}>
-      <div className="grip" />
+    <div
+      className="sheet" role="dialog" aria-label={editing ? "Modifica spesa" : "Nuova spesa"}
+      ref={sheetRef}
+      onPointerDown={onSheetPointerDown}
+      onPointerMove={onSheetPointerMove}
+      onPointerUp={onSheetPointerUp}
+      onPointerCancel={onSheetPointerUp}
+    >
+      <div className="sheet-handle">
+        <div className="grip" />
 
-      <div className="display">
-        <div className="eyebrow">{editing ? "Modifica spesa" : "Nuova spesa"}</div>
-        <div className={`display-amt num ${amount === 0 ? "zero" : ""}`} style={{ marginTop: 8 }}>
-          {display} <span style={{ fontSize: 30, opacity: .5 }}>€</span>
+        <div className="display">
+          <div className="eyebrow">{editing ? "Modifica spesa" : "Nuova spesa"}</div>
+          <div className={`display-amt num ${amount === 0 ? "zero" : ""}`} style={{ marginTop: 8 }}>
+            {display} <span style={{ fontSize: 30, opacity: .5 }}>€</span>
+          </div>
         </div>
       </div>
 
